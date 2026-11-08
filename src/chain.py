@@ -4,7 +4,7 @@ load_dotenv()
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from langchain_groq import ChatGroq
+from src.llm import get_llm
 
 from src.ingestion import get_vectorstore
 from src.retrieval import get_reranked_retriever
@@ -33,7 +33,7 @@ def format_context(docs):
 
 
 def get_rag_chain():
-    llm = ChatGroq(model="openai/gpt-oss-120b")
+    llm = get_llm()
     return (
         {"context": lambda x: format_context(x["docs"]), "question": lambda x: x["question"]}
         | PROMPT
@@ -56,7 +56,7 @@ Standalone question:"""
 
 
 def get_query_rewriter():
-    llm = ChatGroq(model="openai/gpt-oss-20b")
+    llm = get_llm()
     return REWRITE_PROMPT | llm | StrOutputParser()
 
 
@@ -87,7 +87,22 @@ def answer_question(question, history, rag_chain, rewriter, checker, vectorstore
         "faithfulness_reason": check.reason,
         "strategy": strategy,
     }
-    
+
+def prepare_answer(question, history, rewriter, vectorstore, router, hybrid_retriever):
+    """Rewrite the follow-up (if any) and retrieve. Returns what the stream needs."""
+    if history:
+        question = rewriter.invoke({
+            "history": format_history(history),
+            "question": question,
+        })
+
+    docs, strategy = route_and_retrieve(question, vectorstore, router, hybrid_retriever)
+    return question, docs, strategy
+
+
+def check_answer(checker, docs, answer):
+    """Run the faithfulness check on a finished answer."""
+    return checker.invoke({"context": format_context(docs), "answer": answer})   
  
 
 from pydantic import BaseModel, Field
@@ -118,7 +133,7 @@ class FaithfulnessResult(BaseModel):
 
 
 def get_faithfulness_checker():
-    llm = ChatGroq(model="openai/gpt-oss-120b")
+    llm = get_llm()
     structured_llm = llm.with_structured_output(FaithfulnessResult)
     return FAITHFULNESS_PROMPT | structured_llm
 

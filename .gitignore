@@ -4,3 +4,5 @@ __pycache__/
 faiss_index/
 data/
 indexed_files.json
+*.pyc
+.streamlit/secrets.toml
